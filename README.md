@@ -1,6 +1,7 @@
 # Linux Monitoring System -
+this is the tree structure of the project files and directories:
 
-linux-monitoring-system/
+```linux-monitoring-system/
 │
 ├── README.md
 ├── monitor.sh                    # Main controller (M3)
@@ -44,3 +45,4 @@ linux-monitoring-system/
 └── docs/
     ├── output_format.md          # CRITICAL: standardized format
     └── final_report.pdf
+```
