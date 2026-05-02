@@ -1,4 +1,4 @@
-#!/bin/bash
+ #!/bin/bash
 # UI module - format and display the monitoring dashboard.
 #
 # Reads metrics in the standardized format: NAME|VALUE|STATUS|TIMESTAMP
