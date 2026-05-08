@@ -1,17 +1,16 @@
 #!/bin/bash
-LOG_DIR="/var/log/sysmonitor"
-LOG_FILE="$LOG_DIR/system.log"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+source "$PROJECT_ROOT/config.conf"
+source "$PROJECT_ROOT/scripts/ui/colors.sh"
+
 ARCHIVE_DIR="$LOG_DIR/archive"
 MAX_ARCHIVES=7
-MAX_LOG_SIZE_MB=50
-COMPRESS=true
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+
 mkdir -p "$LOG_DIR" "$ARCHIVE_DIR"
+
 log_msg() {
     local level="$1" message="$2"
     local timestamp; timestamp=$(date '+%Y-%m-%d %H:%M:%S')
@@ -22,24 +21,25 @@ log_msg() {
         *)     echo -e "${GREEN}$message${NC}" ;;
     esac
 }
+
 needs_rotation() {
     [ ! -f "$LOG_FILE" ] && return 1
     local size_mb; size_mb=$(du -m "$LOG_FILE" 2>/dev/null | cut -f1)
     [ "${size_mb:-0}" -ge "$MAX_LOG_SIZE_MB" ]
 }
+
 do_rotate() {
     local reason="${1:-manual}"
     [ ! -f "$LOG_FILE" ] && echo "No log file to rotate" && return 0
     local timestamp; timestamp=$(date '+%Y%m%d_%H%M%S')
     local rotated="$ARCHIVE_DIR/system_${timestamp}.log"
     cp "$LOG_FILE" "$rotated" || { log_msg "ERROR" "Failed to archive log"; return 1; }
-    if [ "$COMPRESS" = true ]; then
-        gzip "$rotated" && rotated="${rotated}.gz"
-    fi
+    gzip "$rotated" && rotated="${rotated}.gz"
     > "$LOG_FILE"
     log_msg "INFO" "Log rotated: $(basename "$rotated") (reason: $reason)"
     cleanup_old
 }
+
 cleanup_old() {
     local count; count=$(ls -1 "$ARCHIVE_DIR"/system_*.log* 2>/dev/null | wc -l)
     if [ "$count" -gt "$MAX_ARCHIVES" ]; then
@@ -48,6 +48,7 @@ cleanup_old() {
         log_msg "INFO" "Cleaned $to_delete old archive(s)"
     fi
 }
+
 show_status() {
     echo -e "${CYAN}${BOLD}=== Log Rotation Status ===${NC}"
     if [ -f "$LOG_FILE" ]; then
@@ -61,6 +62,7 @@ show_status() {
     echo ""
     echo "  Archives: $(ls -1 "$ARCHIVE_DIR"/system_*.log* 2>/dev/null | wc -l) / $MAX_ARCHIVES"
 }
+
 case "${1:---status}" in
     --force|-f)  do_rotate "forced" ;;
     --auto|-a)   needs_rotation && do_rotate "size_limit" ;;
