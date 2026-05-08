@@ -1,19 +1,18 @@
 #!/bin/bash
 # Memory monitoring module
 
-get_memory_usage() {
-    free | awk '/Mem:/ {printf("%.0f", $3/$2 * 100)}'
-}
+source "$(dirname "$0")/../../config.conf"
 
-get_swap_usage() {
-    free | awk '/Swap:/ {
-        if ($2 == 0)
-            print 0
-        else
-            printf("%.0f", $3/$2 * 100)
-    }'
-}
+TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
 
-get_available_memory_mb() {
-    free -m | awk '/Mem:/ {print $7 " MB"}'
-}
+memory_usage=$(free | awk '/Mem:/ {printf("%.0f", $3/$2 * 100)}')
+
+status="OK"
+
+if (( memory_usage >= RAM_CRIT_THRESHOLD )); then
+    status="CRITICAL"
+elif (( memory_usage >= RAM_WARN_THRESHOLD )); then
+    status="WARNING"
+fi
+
+echo "MEMORY_USAGE|${memory_usage}|${status}|${TIMESTAMP}"

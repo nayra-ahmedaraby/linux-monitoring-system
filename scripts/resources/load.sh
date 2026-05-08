@@ -1,14 +1,20 @@
 #!/bin/bash
-# System load monitoring module
+# Load monitoring module
 
-get_load_average() {
-    uptime | awk -F'load average:' '{print $2}' | cut -d',' -f1 | xargs
-}
+source "$(dirname "$0")/../../config.conf"
 
-get_uptime() {
-    uptime -p
-}
+TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
 
-get_logged_users() {
-    who | wc -l
-}
+load_avg=$(uptime | awk -F'load average:' '{print $2}' | cut -d',' -f1 | xargs)
+
+status="OK"
+
+load_int=${load_avg%.*}
+
+if (( load_int >= LOAD_CRIT_THRESHOLD )); then
+    status="CRITICAL"
+elif (( load_int >= LOAD_WARN_THRESHOLD )); then
+    status="WARNING"
+fi
+
+echo "LOAD_AVG_1M|${load_avg}|${status}|${TIMESTAMP}"

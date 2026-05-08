@@ -1,14 +1,18 @@
 #!/bin/bash
 # CPU monitoring module
 
-get_cpu_usage() {
-    top -bn1 | awk '/Cpu\(s\)/ {print int(100 - $8)}'
-}
+source "$(dirname "$0")/../../config.conf"
 
-get_cpu_temperature() {
-    sensors 2>/dev/null | awk '/Package id 0:/ {print $4}' | head -1
-}
+TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
 
-get_top_cpu_process() {
-    ps -eo comm,%cpu --sort=-%cpu | awk 'NR==2 {print $1 " (" $2 "%)"}'
-}
+cpu_usage=$(top -bn1 | awk '/Cpu\(s\)/ {print int(100 - $8)}')
+
+status="OK"
+
+if (( cpu_usage >= CPU_CRIT_THRESHOLD )); then
+    status="CRITICAL"
+elif (( cpu_usage >= CPU_WARN_THRESHOLD )); then
+    status="WARNING"
+fi
+
+echo "CPU_USAGE|${cpu_usage}|${status}|${TIMESTAMP}"

@@ -1,17 +1,21 @@
 #!/bin/bash
 # Disk monitoring module
 
-get_disk_usage() {
-    df / | awk 'NR==2 {
-        gsub("%","",$5)
-        print $5
-    }'
-}
+source "$(dirname "$0")/../../config.conf"
 
-get_disk_free_space() {
-    df -h / | awk 'NR==2 {print $4}'
-}
+TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
 
-get_largest_directory() {
-    du -h /home 2>/dev/null | sort -rh | head -1 | awk '{print $2}'
-}
+disk_usage=$(df / | awk 'NR==2 {
+    gsub("%","",$5)
+    print $5
+}')
+
+status="OK"
+
+if (( disk_usage >= DISK_CRIT_THRESHOLD )); then
+    status="CRITICAL"
+elif (( disk_usage >= DISK_WARN_THRESHOLD )); then
+    status="WARNING"
+fi
+
+echo "DISK_ROOT|${disk_usage}|${status}|${TIMESTAMP}"
