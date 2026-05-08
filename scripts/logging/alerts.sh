@@ -1,32 +1,26 @@
 #!/bin/bash
-LOG_DIR="/var/log/sysmonitor"
-LOG_FILE="$LOG_DIR/system.log"
-ALERT_LOG="$LOG_DIR/alerts.log"
-CPU_WARN_THRESHOLD=70
-CPU_CRIT_THRESHOLD=90
-RAM_WARN_THRESHOLD=75
-RAM_CRIT_THRESHOLD=90
-DISK_WARN_THRESHOLD=80
-DISK_CRIT_THRESHOLD=95
-MONITORED_SERVICES="sshd crond"
-RED='\033[0;31m'
-RED_BG='\033[41m'
-YELLOW='\033[1;33m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+source "$PROJECT_ROOT/config.conf"
+source "$PROJECT_ROOT/scripts/ui/colors.sh"
+
 ALERT_COUNT=0
 WARN_COUNT=0
 OK_COUNT=0
+
 mkdir -p "$LOG_DIR"
+
 get_timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
+
 write_alert_log() {
     local level="$1" component="$2" message="$3"
     local timestamp; timestamp=$(get_timestamp)
     echo "[$timestamp] [$level] [$component] $message" >> "$ALERT_LOG"
     echo "[$timestamp] [$level] [$component] $message" >> "$LOG_FILE"
 }
+
 print_alert() {
     local level="$1" component="$2" message="$3" value="$4" threshold="$5"
     case "$level" in
@@ -43,6 +37,7 @@ print_alert() {
             OK_COUNT=$((OK_COUNT + 1)) ;;
     esac
 }
+
 check_cpu() {
     echo -e "\n${CYAN}${BOLD}── CPU ──${NC}"
     local l1 l2
@@ -64,6 +59,7 @@ check_cpu() {
         write_alert_log "INFO" "CPU" "CPU=${cpu_pct}% OK"
     fi
 }
+
 check_ram() {
     echo -e "\n${CYAN}${BOLD}── RAM ──${NC}"
     local total used pct
@@ -81,6 +77,7 @@ check_ram() {
         write_alert_log "INFO" "RAM" "RAM=${pct}% OK"
     fi
 }
+
 check_disk() {
     echo -e "\n${CYAN}${BOLD}── DISK ──${NC}"
     df -h --output=pcent,target | grep -vE "^(Use|tmpfs|devtmpfs)" | while read -r pct mnt; do
@@ -97,6 +94,7 @@ check_disk() {
         fi
     done
 }
+
 check_services() {
     echo -e "\n${CYAN}${BOLD}── SERVICES ──${NC}"
     for svc in $MONITORED_SERVICES; do
@@ -109,17 +107,20 @@ check_services() {
         fi
     done
 }
+
 echo -e "${CYAN}${BOLD}"
 echo "**********************************************"
 echo "       SYSTEM HEALTH ALERT ENGINE            "
 echo "        $(date '+%Y-%m-%d %H:%M:%S')         "
 echo "**********************************************"
 echo -e "${NC}"
+
 write_alert_log "INFO" "ALERTS" "=== Check started ==="
 check_cpu
 check_ram
 check_disk
 check_services
+
 echo ""
 echo -e "${BOLD}══════════════════════════════════════${NC}"
 echo -e " ${RED}CRITICAL: $ALERT_COUNT${NC} | ${YELLOW}WARNINGS: $WARN_COUNT${NC} | ${GREEN}OK: $OK_COUNT${NC}"
