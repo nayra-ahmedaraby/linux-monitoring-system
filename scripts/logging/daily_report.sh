@@ -1,4 +1,8 @@
 #!/bin/bash
+# =============================================================================
+# daily_report.sh  –  Daily summary report from logs
+# Reads alerts.log and system.log, generates a summary of the day's events.
+# =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -6,126 +10,132 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$PROJECT_ROOT/config.conf"
 source "$PROJECT_ROOT/scripts/ui/colors.sh"
 
-REPORT_DATE=$(date '+%Y-%m-%d')
-REPORT_TIME=$(date '+%H:%M:%S')
+REPORT_DATE="${1:-$(date '+%Y-%m-%d')}"   # accepts a date arg, defaults to today
 REPORT_FILE="$REPORT_DIR/report_${REPORT_DATE}.txt"
 
-mkdir -p "$LOG_DIR" "$REPORT_DIR"
+mkdir -p "$REPORT_DIR"
 
 write_log() {
-    local level="$1" message="$2"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] [DAILY_REPORT] $message" >> "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] [DAILY_REPORT] $1" >> "$LOG_FILE"
 }
 
-draw_bar() {
-    local pct="$1" width=30
-    local filled=$(( pct * width / 100 ))
-    local empty=$(( width - filled ))
-    local color
-    [ "$pct" -ge 90 ] && color="$RED" || { [ "$pct" -ge 75 ] && color="$YELLOW" || color="$GREEN"; }
-    printf "${color}["
-    for ((i=0; i<filled; i++)); do printf "█"; done
-    for ((i=0; i<empty; i++)); do printf "░"; done
-    printf "]${NC} ${BOLD}%3d%%${NC}" "$pct"
+# =============================================================================
+# Grep helpers  –  all reads come from the log files
+# =============================================================================
+
+# lines from today in a given log file
+today_lines() {
+    local file="$1"
+    [ -f "$file" ] && grep "^\[$REPORT_DATE" "$file" || true
 }
 
-get_cpu() {
-    local l1 l2
-    l1=$(awk '/^cpu /{print $2,$3,$4,$5}' /proc/stat); sleep 0.3
-    l2=$(awk '/^cpu /{print $2,$3,$4,$5}' /proc/stat)
-    local u1 n1 s1 i1 u2 n2 s2 i2
-    read -r u1 n1 s1 i1 <<< "$l1"; read -r u2 n2 s2 i2 <<< "$l2"
-    local tdiff=$(( (u2+n2+s2+i2)-(u1+n1+s1+i1) ))
-    local idiff=$(( i2-i1 ))
-    local pct=0; [ "$tdiff" -gt 0 ] && pct=$(( (tdiff-idiff)*100/tdiff ))
-    echo "$pct"
+count_level() {
+    local file="$1" level="$2"
+    today_lines "$file" | grep -c "\[$level\]" || echo 0
 }
 
-print_report() {
-    local cpu_pct; cpu_pct=$(get_cpu)
-    local mem_total mem_used mem_pct
-    mem_total=$(free -m | awk '/^Mem/{print $2}')
-    mem_used=$(free -m | awk '/^Mem/{print $3}')
-    mem_pct=$(( mem_used*100/mem_total ))
-    local load_avg; load_avg=$(awk '{print $1,$2,$3}' /proc/loadavg)
-    local uptime_sec; uptime_sec=$(awk '{print int($1)}' /proc/uptime)
-    local days=$(( uptime_sec/86400 )) hrs=$(( (uptime_sec%86400)/3600 )) mins=$(( (uptime_sec%3600)/60 ))
-    local uptime_str="${days}d ${hrs}h ${mins}m"
+# =============================================================================
+# Build the report
+# =============================================================================
 
-    echo -e "${CYAN}${BOLD}"
-    echo "╔══════════════════════════════════════════════════════╗"
-    echo "║         SYSTEM RESOURCE & HEALTH REPORT             ║"
-    printf "║  Host: %-20s  Date: %s  ║\n" "$(hostname)" "$REPORT_DATE"
-    echo "╚══════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
+{
+# ── Header ────────────────────────────────────────────────────────────────────
+echo -e "${CYAN}${BOLD}"
+echo "════════════════════════════════════════════════════=="
+echo "              DAILY SYSTEM REPORT                       "
+printf"  Host : %-20s  Date : %s  ║\n" "$(hostname)" "$REPORT_DATE"
+echo "══════════════════════════════════════════════════════"
+echo -e "${NC}"
 
-    echo -e "${BLUE}${BOLD}SYSTEM${NC}"
-    echo -e "  Uptime:  $uptime_str"
-    echo -e "  Kernel:  $(uname -r)"
-    echo -e "  OS:      $(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d'"' -f2 || uname -s)"
-    echo -e "  Procs:   $(ps aux | wc -l)"
-    echo ""
+# ── Alert Summary ─────────────────────────────────────────────────────────────
+echo -e "${BLUE}${BOLD}ALERT SUMMARY${NC}"
 
-    echo -e "${BLUE}${BOLD}CPU${NC}"
-    printf "  Usage:   "; draw_bar "$cpu_pct"; echo ""
-    echo -e "  Load:    $load_avg  |  Cores: $(nproc)"
-    echo ""
+crit=$(count_level "$ALERT_LOG" "CRITICAL")
+warn=$(count_level "$ALERT_LOG" "WARN")
+info=$(count_level "$LOG_FILE"  "INFO")
 
-    echo -e "${BLUE}${BOLD}MEMORY${NC}"
-    printf "  RAM:     "; draw_bar "$mem_pct"
-    echo -e "   ${mem_used}MB / ${mem_total}MB"
-    local swap_total swap_used swap_pct=0
-    swap_total=$(free -m | awk '/^Swap/{print $2}')
-    swap_used=$(free -m | awk '/^Swap/{print $3}')
-    if [ "${swap_total:-0}" -gt 0 ]; then
-        swap_pct=$(( swap_used*100/swap_total ))
-        printf "  Swap:    "; draw_bar "$swap_pct"
-        echo -e "   ${swap_used}MB / ${swap_total}MB"
+echo -e "  ${RED}CRITICAL alerts : $crit${NC}"
+echo -e "  ${YELLOW}WARNING  alerts : $warn${NC}"
+echo -e "  ${GREEN}INFO     entries: $info${NC}"
+echo ""
+
+# ── Top Issues ────────────────────────────────────────────────────────────────
+echo -e "${BLUE}${BOLD}TOP ISSUES${NC}"
+
+# CPU criticals
+cpu_crits=$(today_lines "$ALERT_LOG" | grep "\[CRITICAL\].*CPU" | wc -l)
+if [ "$cpu_crits" -gt 0 ]; then
+    cpu_times=$(today_lines "$ALERT_LOG" | grep "\[CRITICAL\].*CPU" | grep -oP '\d{2}:\d{2}:\d{2}' | tr '\n' ', ' | sed 's/,$//')
+    echo -e "  ${RED}● CPU${NC}  $cpu_crits critical alert(s)  →  $cpu_times"
+else
+    echo -e "  ${GREEN}● CPU${NC}  No critical alerts"
+fi
+
+# RAM criticals / warnings
+ram_crits=$(today_lines "$ALERT_LOG" | grep "\[CRITICAL\].*RAM" | wc -l)
+ram_warns=$(today_lines "$ALERT_LOG" | grep "\[WARN\].*RAM"     | wc -l)
+if [ "$ram_crits" -gt 0 ] || [ "$ram_warns" -gt 0 ]; then
+    echo -e "  ${YELLOW}● RAM${NC}  $ram_crits critical, $ram_warns warning alert(s)"
+else
+    echo -e "  ${GREEN}● RAM${NC}  No alerts"
+fi
+
+# Disk criticals / warnings
+disk_crits=$(today_lines "$ALERT_LOG" | grep "\[CRITICAL\].*DISK" | wc -l)
+disk_warns=$(today_lines "$ALERT_LOG" | grep "\[WARN\].*DISK"     | wc -l)
+if [ "$disk_crits" -gt 0 ] || [ "$disk_warns" -gt 0 ]; then
+    echo -e "  ${YELLOW}● DISK${NC}  $disk_crits critical, $disk_warns warning alert(s)"
+else
+    echo -e "  ${GREEN}● DISK${NC}  No alerts"
+fi
+
+echo ""
+
+# ── Service Events ────────────────────────────────────────────────────────────
+echo -e "${BLUE}${BOLD}SERVICE EVENTS${NC}"
+
+for svc in $MONITORED_SERVICES; do
+    stopped=$(today_lines "$ALERT_LOG" | grep "\[CRITICAL\].*SERVICE.*$svc=STOPPED" | wc -l)
+    if [ "$stopped" -gt 0 ]; then
+        times=$(today_lines "$ALERT_LOG" | grep "\[CRITICAL\].*SERVICE.*$svc=STOPPED" | grep -oP '\d{2}:\d{2}:\d{2}' | tr '\n' ', ' | sed 's/,$//')
+        echo -e "  ${RED}● $svc${NC}  went DOWN $stopped time(s)  →  $times"
+    else
+        echo -e "  ${GREEN}● $svc${NC}  stable all day"
     fi
-    echo ""
+done
 
-    echo -e "${BLUE}${BOLD}DISK${NC}"
-    df -h --output=pcent,used,avail,target 2>/dev/null | grep -vE "^(Use|tmpfs|devtmpfs|none)" | while read -r pct used avail mnt; do
-        local p=${pct%%%}
-        echo "$p" | grep -qE '^[0-9]+$' || continue
-        printf "  %-15s " "$mnt"; draw_bar "$p"
-        echo -e "  ${used} used, ${avail} free"
+echo ""
+
+# ── Disk Timing ───────────────────────────────────────────────────────────────
+echo -e "${BLUE}${BOLD}DISK ALERTS TIMING${NC}"
+disk_events=$(today_lines "$ALERT_LOG" | grep "DISK")
+if [ -n "$disk_events" ]; then
+    echo "$disk_events" | while read -r line; do
+        t=$(echo "$line" | grep -oP '\d{2}:\d{2}:\d{2}')
+        mnt=$(echo "$line" | grep -oP 'Mount=\S+' | cut -d= -f2)
+        lvl=$(echo "$line" | grep -oP '\[(CRITICAL|WARN)\]' | tr -d '[]')
+        echo -e "  ● $t  ${mnt:-unknown}  → $lvl"
     done
+else
+    echo -e "  ${GREEN}● No disk alerts today${NC}"
+fi
+echo ""
+
+# ── SSH Attempts (from system.log) ────────────────────────────────────────────
+ssh_fails=$(today_lines "$LOG_FILE" | grep -i "ssh.*fail\|failed.*ssh\|ssh_attempts" | wc -l)
+if [ "$ssh_fails" -gt 0 ]; then
+    last_ssh=$(today_lines "$LOG_FILE" | grep -i "ssh.*fail\|failed.*ssh\|ssh_attempts" | tail -1 | grep -oP '\d{2}:\d{2}:\d{2}')
+    echo -e "${BLUE}${BOLD}SSH ACTIVITY${NC}"
+    echo -e "  ${RED}● Failed attempts : $ssh_fails${NC}  (last at ${last_ssh:-unknown})"
     echo ""
+fi
 
-    echo -e "${BLUE}${BOLD}NETWORK${NC}"
-    for iface_dir in /sys/class/net/*/; do
-        local iface; iface=$(basename "$iface_dir")
-        [ "$iface" = "lo" ] && continue
-        local state; state=$(cat "$iface_dir/operstate" 2>/dev/null)
-        local ip; ip=$(ip addr show "$iface" 2>/dev/null | awk '/inet /{print $2}' | head -1)
-        if [ "$state" = "up" ]; then
-            echo -e "  ${GREEN}● ${BOLD}$iface${NC}  UP  |  IP: ${ip:-none}"
-        else
-            echo -e "  ${RED}● ${BOLD}$iface${NC}  ${RED}DOWN${NC}"
-        fi
-    done
-    echo ""
+# ── Footer ────────────────────────────────────────────────────────────────────
+echo -e "${DIM}  Generated : $(date '+%Y-%m-%d %H:%M:%S')"
+echo -e "  From logs : $LOG_FILE"
+echo -e "            : $ALERT_LOG${NC}"
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
 
-    echo -e "${BLUE}${BOLD}SERVICES${NC}"
-    for svc in $MONITORED_SERVICES; do
-        if systemctl is-active --quiet "$svc" 2>/dev/null || pgrep -x "$svc" > /dev/null 2>&1; then
-            echo -e "  ${GREEN}● ${BOLD}$svc${NC}  RUNNING"
-        else
-            echo -e "  ${RED}● ${BOLD}$svc${NC}  ${RED}STOPPED ⚠${NC}"
-        fi
-    done
-    echo ""
+} | tee "$REPORT_FILE"
 
-    echo -e "${BLUE}${BOLD}TOP PROCESSES${NC}"
-    printf "  ${DIM}%-20s %6s %6s${NC}\n" "COMMAND" "CPU%" "MEM%"
-    ps aux --sort=-%cpu 2>/dev/null | head -6 | tail -5 | awk '{printf "  %-20s %5s%% %5s%%\n", substr($11,1,20), $3, $4}'
-    echo ""
-
-    echo -e "${DIM}Generated: $REPORT_DATE $REPORT_TIME | Log: $LOG_FILE${NC}"
-    echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
-}
-
-write_log "INFO" "Report started"
-print_report | tee "$REPORT_FILE"
-write_log "INFO" "Report saved to $REPORT_FILE"
+write_log "Report saved to $REPORT_FILE"
