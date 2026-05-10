@@ -1,4 +1,9 @@
 #!/bin/bash
+
+timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+
 users=$(who | wc -l)
-echo "LOGGED_USERS=$users"
-# Security module for monitoring system users and accounts
+
+status="OK"
+
+echo "LOGGED_USERS|$users|$status|$timestamp"

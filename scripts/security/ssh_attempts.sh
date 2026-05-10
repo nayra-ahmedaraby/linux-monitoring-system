@@ -1,6 +1,15 @@
 #!/bin/bash
 
-failed_ssh=$(grep "Failed password" /var/log/auth.log 2>/dev/null | wc -l)
+timestamp=$(date "+%Y-%m-%d %H:%M:%S")
 
-echo "FAILED_SSH=$failed_ssh"
-# Security module for monitoring SSH authentication attempts
+failed=$(grep "Failed password" /var/log/auth.log 2>/dev/null | wc -l)
+
+if [ $failed -ge 10 ]; then
+    status="CRITICAL"
+elif [ $failed -ge 5 ]; then
+    status="WARNING"
+else
+    status="OK"
+fi
+
+echo "FAILED_SSH|$failed|$status|$timestamp"
