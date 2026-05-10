@@ -1,15 +1,22 @@
 #!/bin/bash
+# Security module for monitoring SSH authentication attempts
 
-timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$PROJECT_ROOT/config.conf" 2>/dev/null
 
-failed=$(grep "Failed password" /var/log/auth.log 2>/dev/null | wc -l)
+now=$(date '+%Y-%m-%d %H:%M:%S')
 
-if [ $failed -ge 10 ]; then
-    status="CRITICAL"
-elif [ $failed -ge 5 ]; then
-    status="WARNING"
+# Debian/Kali uses auth.log, Red Hat uses secure
+if [ -r /var/log/auth.log ]; then
+    failed_ssh=$(grep -c "Failed password" /var/log/auth.log 2>/dev/null)
+elif [ -r /var/log/secure ]; then
+    failed_ssh=$(grep -c "Failed password" /var/log/secure 2>/dev/null)
 else
-    status="OK"
+    failed_ssh=0
 fi
 
-echo "FAILED_SSH|$failed|$status|$timestamp"
+status="OK"
+[ "$failed_ssh" -ge 5 ]  && status="WARNING"
+[ "$failed_ssh" -ge 20 ] && status="CRITICAL"
+
+echo "FAILED_SSH|${failed_ssh}|${status}|${now}"

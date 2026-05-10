@@ -1,9 +1,8 @@
 #!/bin/bash
 # Network monitoring module
 
-#!/bin/bash
-
-source ../../config.conf 2>/dev/null
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$PROJECT_ROOT/config.conf" 2>/dev/null
 
 TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
 

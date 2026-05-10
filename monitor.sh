@@ -21,10 +21,13 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTION]
 
-  --once       Print one dashboard snapshot and exit (default)
-  --watch      Live dashboard, refreshes every ${REFRESH_INTERVAL:-5}s
+  --once       Print one dashboard snapshot using mock data (default)
+  --real       Print one snapshot using live M1 metrics + mocked M2 signals
+  --watch      Live dashboard with mock data, refreshes every ${REFRESH_INTERVAL:-5}s
+  --watch-real Live dashboard with real M1 metrics + mocked M2 signals
   --menu       Launch the interactive menu
   --alerts     Run the alert engine (scripts/logging/alerts.sh)
+  --test       Run the smoke test suite (tests/smoke_test.sh)
   --help, -h   Show this help
 
 With no option, --once is used.
@@ -34,15 +37,18 @@ EOF
 main() {
     local action="${1:---once}"
     case "$action" in
-        --once)     render_dashboard ;;
-        --watch)    watch_dashboard ;;
-        --menu)     run_menu ;;
-        --alerts)   bash "$PROJECT_ROOT/scripts/logging/alerts.sh" ;;
-        --help|-h)  usage ;;
-        *)          printf 'Unknown option: %s\n\n' "$action"
-                    usage
-                    exit 1
-                    ;;
+        --once)       render_dashboard ;;
+        --real)       render_dashboard real_metrics_partial ;;
+        --watch)      watch_dashboard ;;
+        --watch-real) watch_dashboard "${REFRESH_INTERVAL:-5}" real_metrics_partial ;;
+        --menu)       run_menu ;;
+        --alerts)     bash "$PROJECT_ROOT/scripts/logging/alerts.sh" ;;
+        --test)       bash "$PROJECT_ROOT/tests/smoke_test.sh" ;;
+        --help|-h)    usage ;;
+        *)            printf 'Unknown option: %s\n\n' "$action"
+                      usage
+                      exit 1
+                      ;;
     esac
 }
 

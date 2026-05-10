@@ -1,15 +1,15 @@
 #!/bin/bash
+# Security module for monitoring and managing zombie processes
 
-timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$PROJECT_ROOT/config.conf" 2>/dev/null
+
+now=$(date '+%Y-%m-%d %H:%M:%S')
 
 zombies=$(ps aux | awk '{ if ($8=="Z") print }' | wc -l)
 
-if [ $zombies -ge 5 ]; then
-    status="CRITICAL"
-elif [ $zombies -ge 1 ]; then
-    status="WARNING"
-else
-    status="OK"
-fi
+status="OK"
+[ "$zombies" -ge 1 ] && status="WARNING"
+[ "$zombies" -ge 5 ] && status="CRITICAL"
 
-echo "ZOMBIE_PROCESSES|$zombies|$status|$timestamp"
+echo "ZOMBIES|${zombies}|${status}|${now}"

@@ -146,6 +146,24 @@ mock_metrics() {
     echo "FAILED_SSH|${failed}|${status}|${now}"
 }
 
+
+real_metrics_partial() {
+    # --- M1 Resources (live) ---
+    bash "$PROJECT_ROOT/scripts/resources/cpu.sh"     2>/dev/null
+    bash "$PROJECT_ROOT/scripts/resources/memory.sh"  2>/dev/null
+    bash "$PROJECT_ROOT/scripts/resources/disk.sh"    2>/dev/null
+    bash "$PROJECT_ROOT/scripts/resources/load.sh"    2>/dev/null
+    bash "$PROJECT_ROOT/scripts/resources/network.sh" 2>/dev/null
+
+    # --- M2 Security (live - all scripts now follow canonical format) ---
+    bash "$PROJECT_ROOT/scripts/security/services.sh"       2>/dev/null
+    bash "$PROJECT_ROOT/scripts/security/ssh_attempts.sh"   2>/dev/null
+    bash "$PROJECT_ROOT/scripts/security/open_ports.sh"     2>/dev/null
+    bash "$PROJECT_ROOT/scripts/security/users.sh"          2>/dev/null
+    bash "$PROJECT_ROOT/scripts/security/zombies.sh"        2>/dev/null
+    bash "$PROJECT_ROOT/scripts/security/file_integrity.sh" 2>/dev/null
+}
+
 # ---------- rendering ----------
 
 render_header() {
@@ -218,11 +236,13 @@ render_dashboard() {
 }
 
 # Continuously refresh until interrupted (Ctrl+C).
+# Args: [interval] [producer]
 watch_dashboard() {
     local interval="${1:-${REFRESH_INTERVAL:-5}}"
+    local producer="${2:-mock_metrics}"
     trap 'echo; echo "Stopped."; exit 0' INT
     while true; do
-        render_dashboard
+        render_dashboard "$producer"
         printf '\n  %b(refreshing every %ds - Ctrl+C to stop)%b\n' \
             "$DIM" "$interval" "$NC"
         sleep "$interval"

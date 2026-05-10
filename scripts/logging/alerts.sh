@@ -98,7 +98,18 @@ check_disk() {
 check_services() {
     echo -e "\n${CYAN}${BOLD}── SERVICES ──${NC}"
     for svc in $MONITORED_SERVICES; do
-        if systemctl is-active --quiet "$svc" 2>/dev/null || pgrep -x "$svc" > /dev/null 2>&1; then
+        # Try alternate names for cross-distro support (cron/crond, ssh/sshd)
+        local alt=""
+        case "$svc" in
+            cron)  alt="crond" ;;
+            crond) alt="cron"  ;;
+            ssh)   alt="sshd"  ;;
+            sshd)  alt="ssh"   ;;
+        esac
+        if systemctl is-active --quiet "$svc" 2>/dev/null \
+           || systemctl is-active --quiet "$alt" 2>/dev/null \
+           || pgrep -x "$svc" >/dev/null 2>&1 \
+           || pgrep -x "$alt" >/dev/null 2>&1; then
             print_alert "OK" "SVC" "$svc is running"
             write_alert_log "INFO" "SERVICE" "$svc=RUNNING"
         else

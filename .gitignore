@@ -1,0 +1,33 @@
+# ---- Generated logs (M4) ----
+logs/*.log
+logs/archive/
+*.log
+
+# ---- Reports (M4) ----
+logs/reports/
+report_*.txt
+
+# ---- Baselines (M2) - sensitive, machine-specific ----
+baseline/*.hash
+baseline/*.txt
+baseline/file_hashes.txt
+
+# Keep the placeholder so the empty dirs are committed
+!**/.gitkeep
+
+# ---- Editor / OS junk ----
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Backup files ----
+*.bak
+*.orig
+*.rej
+
+# ---- Local env overrides ----
+.env
+config.local.conf
