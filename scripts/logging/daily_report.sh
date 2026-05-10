@@ -31,7 +31,9 @@ today_lines() {
 
 count_level() {
     local file="$1" level="$2"
-    today_lines "$file" | grep -c "\[$level\]" || echo 0
+    local n
+    n=$(today_lines "$file" | grep -c "\[$level\]" 2>/dev/null)
+    echo "${n:-0}"
 }
 
 # =============================================================================
@@ -41,10 +43,10 @@ count_level() {
 {
 # ── Header ────────────────────────────────────────────────────────────────────
 echo -e "${CYAN}${BOLD}"
-echo "════════════════════════════════════════════════════=="
-echo "              DAILY SYSTEM REPORT                       "
-printf"  Host : %-20s  Date : %s  ║\n" "$(hostname)" "$REPORT_DATE"
-echo "══════════════════════════════════════════════════════"
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║              DAILY SYSTEM REPORT                     ║"
+printf "║  Host: %-19s  Date: %-19s║\n" "$(hostname)" "$REPORT_DATE"
+echo "╚══════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
 # ── Alert Summary ─────────────────────────────────────────────────────────────
