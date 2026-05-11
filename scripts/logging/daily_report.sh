@@ -108,15 +108,21 @@ done
 
 echo ""
 
-# ── Disk Timing ───────────────────────────────────────────────────────────────
+# ── Disk Timing - WARN/CRITICAL only ──────────────────────────────────────────
 echo -e "${BLUE}${BOLD}DISK ALERTS TIMING${NC}"
-disk_events=$(today_lines "$ALERT_LOG" | grep "DISK")
+# Filter to alerts only (WARN/CRITICAL); INFO entries are routine OK checks
+disk_events=$(today_lines "$ALERT_LOG" | grep "DISK" | grep -E "\[(CRITICAL|WARN)\]")
 if [ -n "$disk_events" ]; then
     echo "$disk_events" | while read -r line; do
         t=$(echo "$line" | grep -oP '\d{2}:\d{2}:\d{2}')
         mnt=$(echo "$line" | grep -oP 'Mount=\S+' | cut -d= -f2)
         lvl=$(echo "$line" | grep -oP '\[(CRITICAL|WARN)\]' | tr -d '[]')
-        echo -e "  ● $t  ${mnt:-unknown}  → $lvl"
+        case "$lvl" in
+            CRITICAL) color="$RED" ;;
+            WARN)     color="$YELLOW" ;;
+            *)        color="$NC" ;;
+        esac
+        echo -e "  ${color}●${NC} $t  ${mnt:-unknown}  → ${color}${lvl}${NC}"
     done
 else
     echo -e "  ${GREEN}● No disk alerts today${NC}"

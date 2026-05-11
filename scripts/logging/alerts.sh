@@ -80,7 +80,9 @@ check_ram() {
 
 check_disk() {
     echo -e "\n${CYAN}${BOLD}── DISK ──${NC}"
-    df -h --output=pcent,target | grep -vE "^(Use|tmpfs|devtmpfs)" | while read -r pct mnt; do
+    # Use process substitution (< <(...)) instead of pipe so the while loop
+    # runs in the main shell - otherwise counter increments would be lost.
+    while read -r pct mnt; do
         pct=${pct%%%}
         if [ "$pct" -ge "$DISK_CRIT_THRESHOLD" ]; then
             print_alert "CRITICAL" "DISK" "Disk almost full: $mnt" "${pct}%" "${DISK_CRIT_THRESHOLD}%"
@@ -92,7 +94,7 @@ check_disk() {
             print_alert "OK" "DISK" "$mnt - ${pct}% used"
             write_alert_log "INFO" "DISK" "Mount=$mnt Usage=${pct}% OK"
         fi
-    done
+    done < <(df -h --output=pcent,target | grep -vE "^(Use|tmpfs|devtmpfs)")
 }
 
 check_services() {
