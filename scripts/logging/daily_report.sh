@@ -115,7 +115,10 @@ disk_events=$(today_lines "$ALERT_LOG" | grep "DISK" | grep -E "\[(CRITICAL|WARN
 if [ -n "$disk_events" ]; then
     echo "$disk_events" | while read -r line; do
         t=$(echo "$line" | grep -oP '\d{2}:\d{2}:\d{2}')
-        mnt=$(echo "$line" | grep -oP 'Mount=\S+' | cut -d= -f2)
+        # Try new state-based format: "... on /path" at end
+        mnt=$(echo "$line" | grep -oP 'on \S+$' | awk '{print $2}')
+        # Fallback to old event-based format: "Mount=/path"
+        [ -z "$mnt" ] && mnt=$(echo "$line" | grep -oP 'Mount=\S+' | cut -d= -f2)
         lvl=$(echo "$line" | grep -oP '\[(CRITICAL|WARN)\]' | tr -d '[]')
         case "$lvl" in
             CRITICAL) color="$RED" ;;
