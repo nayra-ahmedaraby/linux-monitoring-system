@@ -1,4 +1,11 @@
 #!/bin/bash
+# Alert engine - state-based.
+#
+# Logs to alerts.log ONLY when a metric's state changes (OK→WARN, WARN→CRIT,
+# CRIT→OK, etc.) instead of every run. This avoids inflating the daily report
+# with hundreds of duplicate entries when a condition persists.
+#
+# Always prints current state to screen so the user gets immediate feedback.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -6,11 +13,19 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$PROJECT_ROOT/config.conf"
 source "$PROJECT_ROOT/scripts/ui/colors.sh"
 
+mkdir -p "$LOG_DIR"
+
+# State file: tracks previous state per metric so we can detect transitions
+STATE_FILE="$LOG_DIR/state.txt"
+touch "$STATE_FILE" 2>/dev/null
+
+# Live counters - reflect current state (not log entries)
 ALERT_COUNT=0
 WARN_COUNT=0
 OK_COUNT=0
+CHANGES_COUNT=0
 
-mkdir -p "$LOG_DIR"
+# ---------- core helpers ----------
 
 get_timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
 
@@ -20,6 +35,25 @@ write_alert_log() {
     echo "[$timestamp] [$level] [$component] $message" >> "$ALERT_LOG"
     echo "[$timestamp] [$level] [$component] $message" >> "$LOG_FILE"
 }
+
+# ---------- state tracking ----------
+
+# prev_state KEY -> previous state for KEY (empty if never seen)
+prev_state() {
+    grep "^$1=" "$STATE_FILE" 2>/dev/null | tail -1 | cut -d= -f2-
+}
+
+# set_state KEY VALUE
+set_state() {
+    local key="$1" value="$2"
+    if grep -q "^${key}=" "$STATE_FILE" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$STATE_FILE"
+    else
+        echo "${key}=${value}" >> "$STATE_FILE"
+    fi
+}
+
+# ---------- printing ----------
 
 print_alert() {
     local level="$1" component="$2" message="$3" value="$4" threshold="$5"
@@ -38,6 +72,35 @@ print_alert() {
     esac
 }
 
+# ---------- the workhorse ----------
+#
+# evaluate KEY NEW_STATE COMPONENT VALUE THRESHOLD MESSAGE
+#   - Always prints current state to screen
+#   - Logs to alerts.log ONLY on state change
+#
+evaluate() {
+    local key="$1" new_state="$2" component="$3" value="$4" threshold="$5" message="$6"
+    local old_state; old_state=$(prev_state "$key")
+
+    # Always show on screen
+    case "$new_state" in
+        CRITICAL) print_alert "CRITICAL" "$component" "$message" "$value" "$threshold" ;;
+        WARN)     print_alert "WARN"     "$component" "$message" "$value" "$threshold" ;;
+        OK)       print_alert "OK"       "$component" "$message" ;;
+    esac
+
+    # Log only on state change
+    if [ "$old_state" != "$new_state" ]; then
+        CHANGES_COUNT=$((CHANGES_COUNT + 1))
+        local from="${old_state:-NONE}"
+        write_alert_log "$new_state" "$component" \
+            "STATE_CHANGE ${from}→${new_state} ${key}=${value:-$message}"
+        set_state "$key" "$new_state"
+    fi
+}
+
+# ---------- checks ----------
+
 check_cpu() {
     echo -e "\n${CYAN}${BOLD}── CPU ──${NC}"
     local l1 l2
@@ -48,16 +111,16 @@ check_cpu() {
     local tdiff=$(( (u2+n2+s2+i2)-(u1+n1+s1+i1) ))
     local idiff=$(( i2-i1 ))
     local cpu_pct=0; [ "$tdiff" -gt 0 ] && cpu_pct=$(( (tdiff-idiff)*100/tdiff ))
+
+    local state msg threshold
     if [ "$cpu_pct" -ge "$CPU_CRIT_THRESHOLD" ]; then
-        print_alert "CRITICAL" "CPU" "CPU critically high!" "${cpu_pct}%" "${CPU_CRIT_THRESHOLD}%"
-        write_alert_log "CRITICAL" "CPU" "CPU=${cpu_pct}%"
+        state="CRITICAL"; msg="CPU critically high!"; threshold="${CPU_CRIT_THRESHOLD}%"
     elif [ "$cpu_pct" -ge "$CPU_WARN_THRESHOLD" ]; then
-        print_alert "WARN" "CPU" "CPU usage high" "${cpu_pct}%" "${CPU_WARN_THRESHOLD}%"
-        write_alert_log "WARN" "CPU" "CPU=${cpu_pct}%"
+        state="WARN"; msg="CPU usage high"; threshold="${CPU_WARN_THRESHOLD}%"
     else
-        print_alert "OK" "CPU" "CPU normal - ${cpu_pct}%"
-        write_alert_log "INFO" "CPU" "CPU=${cpu_pct}% OK"
+        state="OK"; msg="CPU normal - ${cpu_pct}%"; threshold=""
     fi
+    evaluate "CPU" "$state" "CPU" "${cpu_pct}%" "$threshold" "$msg"
 }
 
 check_ram() {
@@ -66,41 +129,38 @@ check_ram() {
     total=$(free -m | awk '/^Mem/{print $2}')
     used=$(free -m | awk '/^Mem/{print $3}')
     pct=$(( used*100/total ))
+
+    local state msg threshold
     if [ "$pct" -ge "$RAM_CRIT_THRESHOLD" ]; then
-        print_alert "CRITICAL" "RAM" "Memory critically high!" "${pct}%" "${RAM_CRIT_THRESHOLD}%"
-        write_alert_log "CRITICAL" "RAM" "RAM=${pct}%"
+        state="CRITICAL"; msg="Memory critically high!"; threshold="${RAM_CRIT_THRESHOLD}%"
     elif [ "$pct" -ge "$RAM_WARN_THRESHOLD" ]; then
-        print_alert "WARN" "RAM" "Memory usage high" "${pct}%" "${RAM_WARN_THRESHOLD}%"
-        write_alert_log "WARN" "RAM" "RAM=${pct}%"
+        state="WARN"; msg="Memory usage high"; threshold="${RAM_WARN_THRESHOLD}%"
     else
-        print_alert "OK" "RAM" "Memory normal - ${pct}%"
-        write_alert_log "INFO" "RAM" "RAM=${pct}% OK"
+        state="OK"; msg="Memory normal - ${pct}%"; threshold=""
     fi
+    evaluate "RAM" "$state" "RAM" "${pct}%" "$threshold" "$msg"
 }
 
 check_disk() {
     echo -e "\n${CYAN}${BOLD}── DISK ──${NC}"
-    # Use process substitution (< <(...)) instead of pipe so the while loop
-    # runs in the main shell - otherwise counter increments would be lost.
     while read -r pct mnt; do
         pct=${pct%%%}
+        local state msg threshold
         if [ "$pct" -ge "$DISK_CRIT_THRESHOLD" ]; then
-            print_alert "CRITICAL" "DISK" "Disk almost full: $mnt" "${pct}%" "${DISK_CRIT_THRESHOLD}%"
-            write_alert_log "CRITICAL" "DISK" "Mount=$mnt Usage=${pct}%"
+            state="CRITICAL"; msg="Disk almost full: $mnt"; threshold="${DISK_CRIT_THRESHOLD}%"
         elif [ "$pct" -ge "$DISK_WARN_THRESHOLD" ]; then
-            print_alert "WARN" "DISK" "Disk high: $mnt" "${pct}%" "${DISK_WARN_THRESHOLD}%"
-            write_alert_log "WARN" "DISK" "Mount=$mnt Usage=${pct}%"
+            state="WARN"; msg="Disk high: $mnt"; threshold="${DISK_WARN_THRESHOLD}%"
         else
-            print_alert "OK" "DISK" "$mnt - ${pct}% used"
-            write_alert_log "INFO" "DISK" "Mount=$mnt Usage=${pct}% OK"
+            state="OK"; msg="$mnt - ${pct}% used"; threshold=""
         fi
+        # Per-mount key so each filesystem has its own state
+        evaluate "DISK_$mnt" "$state" "DISK" "${pct}% on $mnt" "$threshold" "$msg"
     done < <(df -h --output=pcent,target | grep -vE "^(Use|tmpfs|devtmpfs)")
 }
 
 check_services() {
     echo -e "\n${CYAN}${BOLD}── SERVICES ──${NC}"
     for svc in $MONITORED_SERVICES; do
-        # Try alternate names for cross-distro support (cron/crond, ssh/sshd)
         local alt=""
         case "$svc" in
             cron)  alt="crond" ;;
@@ -108,18 +168,21 @@ check_services() {
             ssh)   alt="sshd"  ;;
             sshd)  alt="ssh"   ;;
         esac
+
+        local state msg
         if systemctl is-active --quiet "$svc" 2>/dev/null \
            || systemctl is-active --quiet "$alt" 2>/dev/null \
            || pgrep -x "$svc" >/dev/null 2>&1 \
            || pgrep -x "$alt" >/dev/null 2>&1; then
-            print_alert "OK" "SVC" "$svc is running"
-            write_alert_log "INFO" "SERVICE" "$svc=RUNNING"
+            state="OK"; msg="$svc is running"
         else
-            print_alert "CRITICAL" "SVC" "$svc is NOT running!"
-            write_alert_log "CRITICAL" "SERVICE" "$svc=STOPPED"
+            state="CRITICAL"; msg="$svc is NOT running!"
         fi
+        evaluate "SVC_$svc" "$state" "SVC" "$svc" "" "$msg"
     done
 }
+
+# ---------- main ----------
 
 echo -e "${CYAN}${BOLD}"
 echo "**********************************************"
@@ -128,14 +191,21 @@ echo "        $(date '+%Y-%m-%d %H:%M:%S')         "
 echo "**********************************************"
 echo -e "${NC}"
 
-write_alert_log "INFO" "ALERTS" "=== Check started ==="
+# Heartbeat - always logged to system.log so daily_report can confirm checks ran.
+# This is the ONLY routine entry; everything else only logs on state change.
+echo "[$(get_timestamp)] [INFO] [ALERTS] Check started" >> "$LOG_FILE"
+
 check_cpu
 check_ram
 check_disk
 check_services
 
 echo ""
-echo -e "${BOLD}══════════════════════════════════════${NC}"
-echo -e " ${RED}CRITICAL: $ALERT_COUNT${NC} | ${YELLOW}WARNINGS: $WARN_COUNT${NC} | ${GREEN}OK: $OK_COUNT${NC}"
-echo -e "${BOLD}══════════════════════════════════════${NC}"
-write_alert_log "INFO" "ALERTS" "Done. CRITICAL=$ALERT_COUNT WARN=$WARN_COUNT OK=$OK_COUNT"
+echo -e "${BOLD}══════════════════════════════════════════════════${NC}"
+echo -e " Current state: ${RED}CRITICAL: $ALERT_COUNT${NC} | ${YELLOW}WARN: $WARN_COUNT${NC} | ${GREEN}OK: $OK_COUNT${NC}"
+echo -e " ${CYAN}State changes this run: $CHANGES_COUNT${NC}  (only changes are logged)"
+echo -e "${BOLD}══════════════════════════════════════════════════${NC}"
+
+if [ "$CHANGES_COUNT" -eq 0 ]; then
+    echo "[$(get_timestamp)] [INFO] [ALERTS] No state changes (all metrics stable)" >> "$LOG_FILE"
+fi
